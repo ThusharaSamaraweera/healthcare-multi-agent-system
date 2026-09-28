@@ -1,0 +1,12 @@
+# Model Configuration 
+
+openrouter:
+  # Default models by tier
+  chat:
+    general: openai/gpt-4o-mini           # Fast, cost-effective
+    strong: openai/gpt-4o                  # High capability
+    reason: openai/o3-mini                 # Reasoning tasks
+  
+  embedding:
+    default: openai/text-embedding-3-large  # 3072 dimensions
+    small: openai/text-embedding-3-small    # 1536 dimensions
