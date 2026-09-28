@@ -138,3 +138,17 @@ EMBEDDING_DIM = 1536  # Default for text-embedding-3-small
 
 EMBEDDING_BATCH_SIZE = _get_nested(_PARAMS, "embedding", "batch_size", default=100)
 EMBEDDING_SHOW_PROGRESS = _get_nested(_PARAMS, "embedding", "show_progress", default=False)
+
+# ========================================
+# Helper Functions
+# ========================================
+
+def get_api_key(provider: Optional[str] = None) -> Optional[str]:
+    """Get API key for the specified provider."""
+    provider = provider or PROVIDER
+    key_map = {
+        "openrouter": "OPENROUTER_API_KEY",
+        "tavily": "TAVILY_API_KEY",
+    }
+    env_var = key_map.get(provider, f"{provider.upper()}_API_KEY")
+    return os.getenv(env_var)
