@@ -18,7 +18,7 @@ load_dotenv()
 
 from api.schemas import (
     ChatRequest, ChatResponse,
-    HealthResponse, ToolStatus,
+    HealthResponse, ToolStatus, GraphEdge, GraphResponse
 )
 
 # ── Lifespan — build agent once at startup ────────────────────
@@ -103,3 +103,24 @@ async def chat(request: ChatRequest):
         logger.error(f"Chat failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/graph", response_model=GraphResponse, tags=["System"])
+async def graph_topology():
+    agent = _get_agent()
+
+    g = agent.graph.get_graph()
+
+    # Mermaid text
+    mermaid = g.draw_mermaid()
+
+    # Structured nodes & edges
+    nodes = list(g.nodes.keys())
+    edges = []
+    for edge in g.edges:
+        edges.append(GraphEdge(
+            source=edge.source,
+            target=edge.target,
+            conditional=edge.conditional,
+            label=edge.data if isinstance(edge.data, str) else None,
+        ))
+
+    return GraphResponse(mermaid=mermaid, nodes=nodes, edges=edges)

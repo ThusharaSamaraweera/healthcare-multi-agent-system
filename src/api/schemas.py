@@ -39,3 +39,18 @@ class HealthResponse(BaseModel):
     """GET /health — system liveness and readiness."""
     status: str = "ok"
     tools: ToolStatus = Field(default_factory=ToolStatus)
+
+
+class GraphEdge(BaseModel):
+    """A single edge in the LangGraph topology."""
+    source: str
+    target: str
+    conditional: bool = False
+    label: Optional[str] = None
+
+
+class GraphResponse(BaseModel):
+    """GET /graph — LangGraph topology."""
+    mermaid: str
+    nodes: List[str] = Field(default_factory=list)
+    edges: List[GraphEdge] = Field(default_factory=list)
