@@ -1,6 +1,6 @@
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from agents.state import AgentState
 from infrastructure.observability import observe, update_current_trace
@@ -31,6 +31,13 @@ class AgentOrchestrator:
 
         # Build the graph
         self.graph = self._build_graph()
+
+    
+    # ── Node Implementations ────────────────────────────────────────
+
+    @observe(name="node_recall")
+    def recall_node(self, state: AgentState) -> Dict:
+        pass
 
     @observe(name="node_supervisor")
     def supervisor_node(self, state: AgentState) -> Dict:
@@ -67,7 +74,39 @@ class AgentOrchestrator:
             # Primary decision (backward compat)
             "route_decision": route_decisions[0],
         }
-    
+
+    @observe(name="node_admin_agent")
+    def admin_agent_node(self, state: AgentState) -> Dict:
+        pass
+
+    @observe(name="node_clinical_agent")
+    def clinical_agent_node(self, state: AgentState) -> Dict:
+        pass
+
+    @observe(name="node_direct_agent")
+    def direct_agent_node(self, state: AgentState) -> Dict:
+        """Specialized Agent for greetings and general inquiries."""
+        system_prompt = build_direct_agent_prompt()
+
+        route_label = "direct"
+
+        answer = self._generate_agent_response(state, system_prompt, "")
+
+        return {
+            "messages": [AIMessage(content=answer)],
+            "final_answer": answer,
+            "tool_output": "",
+            "agent_outputs": [{"route": route_label,"tool_output": "", "answer": answer}],
+        }
+
+    @observe(name="node_merge_responses")
+    def merge_responses_node(self, state: AgentState) -> Dict:
+        pass
+
+    @observe(name="node_save_memory")
+    def save_memory_node(self, state: AgentState) -> Dict:
+        pass
+
     def _generate_agent_response(self, state: AgentState, system_prompt: str, tool_output: str, extra_context: str = "") -> str:
 
         user_message = state["messages"][-1].content
@@ -87,33 +126,56 @@ class AgentOrchestrator:
         response = self.llm_chat.invoke(messages)
         return response.content if hasattr(response, "content") else str(response)
 
-
-    @observe(name="node_direct_agent")
-    def direct_agent_node(self, state: AgentState) -> Dict:
-        """Specialized Agent for greetings and general inquiries."""
-        system_prompt = build_direct_agent_prompt()
-
-        route_label = "direct"
-
-        answer = self._generate_agent_response(state, system_prompt, "")
-
-        return {
-            "messages": [AIMessage(content=answer)],
-            "final_answer": answer,
-            "tool_output": "",
-            "agent_outputs": [{"route": route_label,"tool_output": "", "answer": answer}],
+    def supervisor_routing(self, state: AgentState) -> Union[str, List[str]]:
+        route_map = {
+            "crm": "admin",
+            "rag": "clinical",
+            "web_search": "direct",
+            "direct": "direct",
         }
+
+        decisions = state.get("route_decisions", [])
+        if not decisions:
+            return "direct"
+
+        # Map routes to node names, deduplicate, preserve order
+        node_names = []
+        seen = set()
+        for d in decisions:
+            node = route_map.get(d.get("route", "direct"), "direct")
+            if node not in seen:
+                node_names.append(node)
+                seen.add(node)
+
+        # Single route → return string (no fan-out)
+        # Multiple routes → return list (LangGraph fan-out)
+        if len(node_names) == 1:
+            return node_names[0]
+        return node_names
 
 
     def _build_graph(self) -> StateGraph:
         workflow = StateGraph(AgentState)
 
-        workflow.set_entry_point("supervisor")
-
+        workflow.add_node("recall", self.recall_node)
         workflow.add_node("supervisor", self.supervisor_node)
         workflow.add_node("direct_agent", self.direct_agent_node)
+        workflow.add_node("admin_agent", self.admin_agent_node)
+        workflow.add_node("clinical_agent", self.clinical_agent_node)
+        workflow.add_node("merge_responses", self.merge_responses_node)
+        workflow.add_node("save_memory", self.save_memory_node)
 
-        workflow.add_edge("supervisor", "direct_agent")
+        workflow.set_entry_point("supervisor")
+
+        workflow.add_conditional_edges(
+            "supervisor",
+            self.supervisor_routing,
+            {
+                "direct": "direct_agent",
+                "admin": "admin_agent",
+                "clinical": "clinical_agent",
+            },
+        )
 
         workflow.add_edge("direct_agent", END)
 
