@@ -2,8 +2,10 @@ from infrastructure.observability import fetch_prompt
 
 
 LANGFUSE_PROMPT_NAMES = {
+    "agent_system":       "nawaloka-agent-system",
     "router_system":      "nawaloka-router-system",
     "router_user":        "nawaloka-router-user",
+    "direct_agent":       "nawaloka-direct-agent",
 }
 
 _ROUTER_SYSTEM_FALLBACK = """\
@@ -39,7 +41,6 @@ USER MESSAGE:
 {user_message}
 
 Classify and extract (JSON):"""
-
 
 _AGENT_SYSTEM_FALLBACK = """\
 You are **Nawaloka Health Assistant**, a friendly and knowledgeable AI assistant

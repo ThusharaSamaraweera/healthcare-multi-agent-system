@@ -162,3 +162,15 @@ class AgentOrchestrator:
             latency_ms=latency
         )
 
+def build_agent(enable_crm: bool = True, enable_rag: bool = True, enable_web: bool = True) -> AgentOrchestrator:
+    """Builds the Multi-Agent Orchestrator."""
+    from infrastructure.llm import get_chat_llm, get_router_llm
+
+    llm_chat = get_chat_llm(temperature=0)
+    llm_router = get_router_llm(temperature=0)
+
+
+    return AgentOrchestrator(
+        llm_chat=llm_chat,
+        llm_router=llm_router,
+    )

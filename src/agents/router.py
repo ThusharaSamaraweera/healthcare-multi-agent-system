@@ -91,6 +91,15 @@ class QueryRouter:
 
         except Exception as exc:
             logger.error("Router LLM call failed: {}", exc)
+            return MultiRouteDecision(
+                decisions=[
+                    RouteDecision(
+                        route="direct",
+                        confidence=0.0,
+                        reasoning=f"Router LLM error: {exc}",
+                    )
+                ]
+            )
 
         return self._parse_response(content)
     
