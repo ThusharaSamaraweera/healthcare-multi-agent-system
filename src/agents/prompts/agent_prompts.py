@@ -3,6 +3,7 @@ from infrastructure.observability import fetch_prompt
 
 LANGFUSE_PROMPT_NAMES = {
     "router_system":      "nawaloka-router-system",
+    "router_user":        "nawaloka-router-user",
 }
 
 _ROUTER_SYSTEM_FALLBACK = """\
