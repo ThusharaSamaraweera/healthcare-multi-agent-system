@@ -60,7 +60,7 @@ dependencies = [
     "uvicorn[standard]>=0.27.0",
 
     # ── Memory & Database ─────────────────────────────────────────
-    "sqlalchemy>=2.0.0",
+    "sqlalchemy==2.0.52",
     "pytz>=2024.1",
     "python-dateutil>=2.8.0",
 
