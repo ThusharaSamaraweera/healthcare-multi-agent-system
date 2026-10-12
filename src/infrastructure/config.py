@@ -139,6 +139,9 @@ EMBEDDING_DIM = 1536  # Default for text-embedding-3-small
 EMBEDDING_BATCH_SIZE = _get_nested(_PARAMS, "embedding", "batch_size", default=100)
 EMBEDDING_SHOW_PROGRESS = _get_nested(_PARAMS, "embedding", "show_progress", default=False)
 
+# Timezone used when formatting CRM appointment times.
+TIMEZONE = "Asia/Colombo"
+
 # ========================================
 # Helper Functions
 # ========================================
