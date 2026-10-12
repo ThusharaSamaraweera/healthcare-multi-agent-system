@@ -4,6 +4,7 @@ import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
+import re
 
 from sqlalchemy import and_
 from sqlalchemy.orm import sessionmaker
@@ -44,6 +45,14 @@ class CRMTool:
             return name
         return f"Dr. {name}"
 
+    @staticmethod
+    def _normalize_external_user_id(value: str | None) -> str | None:
+        if value is None:
+            return None
+
+        normalized = re.sub(r"\D", "", value.strip())
+        return normalized or None
+
     def _parse_iso_datetime(self, value: str) -> Optional[int]:
         if not value:
             return None
@@ -56,6 +65,10 @@ class CRMTool:
         return int(dt.timestamp())
 
     def patient_id_for_external_user(self, external_user_id: str) -> Optional[str]:
+        external_user_id = self._normalize_external_user_id(external_user_id)
+        if external_user_id is None:
+            return None
+
         session = self._session()
         try:
             patient = (
@@ -81,6 +94,9 @@ class CRMTool:
             if patient_id:
                 query = query.filter(Patient.patient_id == patient_id)
             elif external_user_id:
+                external_user_id = self._normalize_external_user_id(external_user_id)
+                if external_user_id is None:
+                    return "No patient found matching the given criteria."
                 query = query.filter(Patient.external_user_id == external_user_id)
             elif phone:
                 query = query.filter(Patient.phone == phone)

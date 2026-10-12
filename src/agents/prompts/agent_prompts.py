@@ -6,6 +6,7 @@ LANGFUSE_PROMPT_NAMES = {
     "router_system":      "nawaloka-router-system",
     "router_user":        "nawaloka-router-user",
     "direct_agent":       "nawaloka-direct-agent",
+    "admin_agent":        "nawaloka-admin-agent",
 }
 
 _ROUTER_SYSTEM_FALLBACK = """\
@@ -15,21 +16,51 @@ Given a user message AND memory context, classify the intent into
 one.
 
 ROUTES:
+  crm        — Patient lookup, doctor search, booking.
   direct     — Greeting, chitchat, follow-up, or answerable from memory alone.
+
+MULTI-ROUTE RULE:
+Most queries need only ONE route.  Use multiple routes ONLY when the
+query contains clearly separate intents (e.g. connected by "and",
+"also", "plus", or asking about two unrelated topics in one message).
+When in doubt, use a single route.
+
+
+EXAMPLES of multi-route queries:
+- "Check my appointments and tell me the infection control policy"
+→ routes: [crm/lookup_patient]
+- "Who are the available cardiologists, and what are the visiting hours?"
+→ routes: [crm/search_doctors]
+- "What is the hospital's maternity policy and can you book me an appointment?"
+→ routes: [crm/create_booking]
+
+
+For CRM you must also extract the sub-action:
+  lookup_patient | search_doctors | create_booking 
 
 OUTPUT FORMAT (strict JSON, no markdown fences):
 {
   "routes": [
     {
-      "route": "<direct>",
+      "route": "<crm|direct>",
       "confidence": <0.0-1.0>,
       "reasoning": "<one-sentence explanation>",
+      "action": "<sub-action or null>",
       "params": { empty {}> }
     }
   ]
 }
 
+For single-intent queries, the "routes" array has ONE element.
+For multi-intent queries, it has TWO or THREE elements (never more than 3).
+
 PARAMETER EXTRACTION RULES:
+• For lookup_patient  → extract phone, name, patient_id, external_user_id (any available).
+• For search_doctors  → extract specialty, location, name (any available).
+• For create_booking  → extract start_at (full ISO datetime, including timezone),
+  doctor_name, specialty, location_name, and reason. Do not invent doctor,
+  location, or patient IDs; include an ID only when it is already present in
+  the memory context.
 • For direct          → params = {}.
 """
 
@@ -63,6 +94,16 @@ Style: Warm, welcoming, and hospitable.
 
 """
 
+_ADMIN_AGENT_FALLBACK = """\
+You are the Nawaloka Hospital Administrative Assistant.
+Your job is to manage appointments and patient queries efficiently.
+Style: Professional, helpful, and concise.
+Guardrail: NEVER provide medical advice. If asked clinical questions, decline politely.
+
+When CRM search results are available (e.g. doctor lists, appointment records),
+present them directly to the patient.  Do NOT ask clarifying questions if you
+already have results to show — show the results first, then offer to help further.
+"""
 
 def build_router_prompt(
     user_message: str,
@@ -91,5 +132,17 @@ def build_direct_agent_prompt() -> str:
     persona = fetch_prompt(
         LANGFUSE_PROMPT_NAMES["direct_agent"],
         fallback=_DIRECT_AGENT_FALLBACK,
+    )
+    return base + "\n\n" + persona
+
+def build_admin_agent_prompt() -> str:
+    """Return the system prompt for the Admin Agent (CRM/scheduling)."""
+    base = fetch_prompt(
+        LANGFUSE_PROMPT_NAMES["agent_system"],
+        fallback=_AGENT_SYSTEM_FALLBACK,
+    )
+    persona = fetch_prompt(
+        LANGFUSE_PROMPT_NAMES["admin_agent"],
+        fallback=_ADMIN_AGENT_FALLBACK,
     )
     return base + "\n\n" + persona

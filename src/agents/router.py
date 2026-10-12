@@ -6,7 +6,7 @@ from infrastructure.observability import observe, update_current_observation
 from agents.prompts.agent_prompts import build_router_prompt
 
 # Valid routes
-VALID_ROUTES = {"direct"}
+VALID_ROUTES = {"direct", "crm"}
 
 # Maximum routes per query (safety cap)
 MAX_ROUTES = 3
@@ -151,7 +151,7 @@ class QueryRouter:
         # ── Build RouteDecision objects ──────────────────────────
         decisions: List[RouteDecision] = []
         seen_routes: set = set()
-
+        
         for rd in route_dicts:
             route = rd.get("route", "direct")
             if route not in VALID_ROUTES:
@@ -162,10 +162,12 @@ class QueryRouter:
                 continue
             seen_routes.add(route)
 
+            action = rd.get("action")
             decisions.append(RouteDecision(
                 route=route,
                 confidence=float(rd.get("confidence", 0.5)),
                 reasoning=rd.get("reasoning", ""),
+                action=action if route == "crm" else None,
                 params=rd.get("params", {}),
             ))
 

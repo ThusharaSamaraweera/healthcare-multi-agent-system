@@ -1,11 +1,13 @@
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Union
+from loguru import logger
 
 from agents.state import AgentState
 from infrastructure.observability import observe, update_current_trace
 from agents.router import QueryRouter
-from agents.prompts.agent_prompts import build_direct_agent_prompt
+from agents.prompts.agent_prompts import (build_direct_agent_prompt, build_admin_agent_prompt)
+from agents.tools.crm_tool import CRMTool
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, END
 
@@ -24,10 +26,12 @@ class AgentResponse:
 
 
 class AgentOrchestrator:
-    def __init__(self, llm_chat: Any, llm_router: Any) -> None:
+    def __init__(self, llm_chat: Any, llm_router: Any, crm_tool: Optional[Any]) -> None:
         self.llm_chat = llm_chat
         self.llm_router = llm_router
         self.router = QueryRouter(llm=llm_router)
+
+        self.crm_tool = crm_tool
 
         # Build the graph
         self.graph = self._build_graph()
@@ -77,7 +81,39 @@ class AgentOrchestrator:
 
     @observe(name="node_admin_agent")
     def admin_agent_node(self, state: AgentState) -> Dict:
-        pass
+        """Specialized Agent for CRM and Scheduling."""
+        # Find the CRM-specific decision from route_decisions
+        decisions = state.get("route_decisions", [])
+        crm_decision = next(
+            (d for d in decisions if d.get("route") == "crm"),
+            state.get("route_decision", {})
+        )
+        action = crm_decision.get("action", "lookup_patient")
+        params = dict(crm_decision.get("params", {}))
+
+        system_prompt = build_admin_agent_prompt()
+
+        if not self.crm_tool:
+            tool_output = "CRM Tool unavailable."
+        else:
+            if action in {"create_booking"}:
+                patient_id = self.crm_tool.patient_id_for_external_user(state["user_id"])
+                if patient_id is None:
+                    tool_output = "No patient record found for the current user."
+                else:
+                    params["patient_id"] = patient_id
+                    tool_output = self.crm_tool.dispatch(action, params)
+            else:
+                tool_output = self.crm_tool.dispatch(action, params)
+
+        answer = self._generate_agent_response(state, system_prompt, tool_output)
+
+        return {
+            "messages": [AIMessage(content=answer)],
+            "tool_output": tool_output,
+            "final_answer": answer,
+            "agent_outputs": [{"route": "crm", "tool_output": tool_output, "answer": answer}],
+        }
 
     @observe(name="node_clinical_agent")
     def clinical_agent_node(self, state: AgentState) -> Dict:
@@ -129,8 +165,6 @@ class AgentOrchestrator:
     def supervisor_routing(self, state: AgentState) -> Union[str, List[str]]:
         route_map = {
             "crm": "admin",
-            "rag": "clinical",
-            "web_search": "direct",
             "direct": "direct",
         }
 
@@ -178,6 +212,7 @@ class AgentOrchestrator:
         )
 
         workflow.add_edge("direct_agent", END)
+        workflow.add_edge("admin_agent", END)
 
         return workflow.compile()
     
@@ -191,15 +226,18 @@ class AgentOrchestrator:
     ) -> AgentResponse:
         t0 = time.time()
 
+        normalized_user_id = CRMTool._normalize_external_user_id(user_id)
+        canonical_user_id = normalized_user_id or user_id.strip()
+
         update_current_trace(
-            user_id=user_id,
+            user_id=canonical_user_id,
             session_id=session_id,
             metadata={"entrypoint": "achat"},
         )
 
         initial_state = {
             "messages": [HumanMessage(content=user_message)],
-            "user_id": user_id,
+            "user_id": canonical_user_id,
             "session_id": session_id,
             "operational_context": operational_context,
             "agent_outputs": [],
@@ -231,8 +269,17 @@ def build_agent(enable_crm: bool = True, enable_rag: bool = True, enable_web: bo
     llm_chat = get_chat_llm(temperature=0)
     llm_router = get_router_llm(temperature=0)
 
+    crm_tool = None
+    if enable_crm:
+        try:
+            from agents.tools import CRMTool
+            crm_tool = CRMTool()
+            logger.info("CRM tool initialised")
+        except Exception as e:
+            logger.warning(f"CRM tool unavailable: {e}")
 
     return AgentOrchestrator(
         llm_chat=llm_chat,
         llm_router=llm_router,
+        crm_tool=crm_tool
     )
