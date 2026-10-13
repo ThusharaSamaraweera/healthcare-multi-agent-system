@@ -22,6 +22,7 @@ from loguru import logger
 # Get project root (parent of src/infrastructure/)
 _PROJECT_ROOT = Path(__file__).parent.parent.parent
 _CONFIG_DIR = _PROJECT_ROOT / "config"
+KB_DIR = _PROJECT_ROOT / "data" / "knowledge_base"
 
 # ========================================
 # YAML Config Loading
@@ -141,6 +142,13 @@ EMBEDDING_SHOW_PROGRESS = _get_nested(_PARAMS, "embedding", "show_progress", def
 
 # Timezone used when formatting CRM appointment times.
 TIMEZONE = "Asia/Colombo"
+
+# Qdrant Cloud configuration
+QDRANT_URL = os.getenv("QDRANT_URL")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
+QDRANT_COLLECTION_NAME = _get_nested(
+    _PARAMS, "qdrant", "collection_name", default="nawaloka"
+)
 
 # ========================================
 # Helper Functions
