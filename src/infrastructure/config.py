@@ -150,6 +150,18 @@ QDRANT_COLLECTION_NAME = _get_nested(
     _PARAMS, "qdrant", "collection_name", default="nawaloka"
 )
 
+
+# Parent-child chunking settings (token targets).
+PARENT_CHUNK_SIZE = _get_nested(
+    _PARAMS, "chunking", "parent_child", "parent_size", default=1200
+)
+CHILD_CHUNK_SIZE = _get_nested(
+    _PARAMS, "chunking", "parent_child", "child_size", default=250
+)
+CHILD_OVERLAP = _get_nested(
+    _PARAMS, "chunking", "parent_child", "child_overlap", default=50
+)
+
 # ========================================
 # Helper Functions
 # ========================================

@@ -1,8 +1,9 @@
-from typing import Optional, Any, Dict
+from typing import Optional, Any, Dict, List
 from loguru import logger
+import uuid
 
 from qdrant_client import QdrantClient
-from qdrant_client.http.models import VectorParams, Distance
+from qdrant_client.http.models import VectorParams, Distance, PointStruct
 
 from infrastructure.config import (QDRANT_URL, QDRANT_API_KEY, QDRANT_COLLECTION_NAME, EMBEDDING_DIM)
 
@@ -89,4 +90,49 @@ def collection_info(collection_name: str = QDRANT_COLLECTION_NAME) -> Dict[str, 
         "distance": info.config.params.vectors.distance.name,  # type: ignore[union-attr]
         "status": info.status.name,
     }
+
+def upsert_chunks(
+    chunks: List[Dict[str, Any]],
+    embeddings: List[List[float]],
+    collection_name: str = QDRANT_COLLECTION_NAME,
+    batch_size: int = 100,
+) -> int:
+    """
+    Upsert document chunks (with embeddings) into Qdrant.
+    """
+    if len(chunks) != len(embeddings):
+        raise ValueError(
+            f"Mismatch: {len(chunks)} chunks vs {len(embeddings)} embeddings"
+        )
+
+    client = get_qdrant_client()
+    total = 0
+
+    for i in range(0, len(chunks), batch_size):
+        batch_chunks = chunks[i : i + batch_size]
+        batch_embeds = embeddings[i : i + batch_size]
+
+        points = []
+        for chunk, vec in zip(batch_chunks, batch_embeds):
+            point_id = str(uuid.uuid4())
+            payload = {
+                "chunk_text": chunk.get("text", ""),
+                "url": chunk.get("url", ""),
+                "title": chunk.get("title", ""),
+                "strategy": chunk.get("strategy", "unknown"),
+                "chunk_index": chunk.get("chunk_index", 0),
+            }
+            # Include any extra metadata
+            for k, v in chunk.items():
+                if k not in ("text", "url", "title", "strategy", "chunk_index"):
+                    payload[k] = v
+
+            points.append(PointStruct(id=point_id, vector=vec, payload=payload))
+
+        client.upsert(collection_name=collection_name, points=points)
+        total += len(points)
+        logger.debug("Upserted batch {}–{} ({} points)", i, i + len(points), len(points))
+
+    logger.info("Upserted {} points into '{}'", total, collection_name)
+    return total
 
