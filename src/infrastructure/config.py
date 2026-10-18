@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 import os
 import yaml
-from loguru import logger
 
 # ========================================
 # Project Paths
@@ -161,6 +160,13 @@ CHILD_CHUNK_SIZE = _get_nested(
 CHILD_OVERLAP = _get_nested(
     _PARAMS, "chunking", "parent_child", "child_overlap", default=50
 )
+
+# ========================================
+# Retrieval Configuration
+# ========================================
+
+TOP_K_RESULTS = _get_nested(_PARAMS, "retrieval", "top_k", default=4)
+SIMILARITY_THRESHOLD = _get_nested(_PARAMS, "retrieval", "similarity_threshold", default=0.7)
 
 # ========================================
 # Helper Functions

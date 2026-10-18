@@ -3,7 +3,7 @@ from loguru import logger
 import uuid
 
 from qdrant_client import QdrantClient
-from qdrant_client.http.models import VectorParams, Distance, PointStruct
+from qdrant_client.http.models import VectorParams, Distance, PointStruct, Filter, FieldCondition, MatchValue
 
 from infrastructure.config import (QDRANT_URL, QDRANT_API_KEY, QDRANT_COLLECTION_NAME, EMBEDDING_DIM)
 
@@ -37,8 +37,6 @@ def get_qdrant_client() -> QdrantClient:
     )
     logger.info("Connected to Qdrant Cloud at {}", QDRANT_URL)
     return _qdrant_client
-
-
 
 def ensure_collection(
     collection_name: str = QDRANT_COLLECTION_NAME,
@@ -135,4 +133,55 @@ def upsert_chunks(
 
     logger.info("Upserted {} points into '{}'", total, collection_name)
     return total
+
+def search_chunks(
+    query_vector: List[float],
+    top_k: int = 4,
+    score_threshold: float = 0.0,
+    collection_name: str = QDRANT_COLLECTION_NAME,
+    strategy_filter: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Semantic search over the RAG knowledge base.
+    """
+    client = get_qdrant_client()
+
+    query_filter = None
+    if strategy_filter:
+        query_filter = Filter(
+            must=[
+                FieldCondition(
+                    key="strategy",
+                    match=MatchValue(value=strategy_filter),
+                )
+            ]
+        )
+
+    response = client.query_points(
+        collection_name=collection_name,
+        query=query_vector,
+        query_filter=query_filter,
+        limit=top_k,
+        score_threshold=score_threshold,
+    )
+
+    results = []
+    for hit in response.points:
+        payload = hit.payload or {}
+        result = {
+            "chunk_text": payload.get("chunk_text", ""),
+            "url": payload.get("url", ""),
+            "title": payload.get("title", ""),
+            "strategy": payload.get("strategy", "unknown"),
+            "chunk_index": payload.get("chunk_index", 0),
+            "score": hit.score,
+        }
+        # Parent-child: include parent text for richer LLM context
+        if "parent_text" in payload:
+            result["parent_text"] = payload["parent_text"]
+        if "parent_id" in payload:
+            result["parent_id"] = payload["parent_id"]
+        results.append(result)
+
+    return results
 
