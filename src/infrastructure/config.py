@@ -166,10 +166,24 @@ CHILD_OVERLAP = _get_nested(
 # ========================================
 
 TOP_K_RESULTS = _get_nested(_PARAMS, "retrieval", "top_k", default=4)
+SIMILARITY_THRESHOLD = _get_nested(_PARAMS, "retrieval", "similarity_threshold", default=0.7)
+
+# ========================================
+# CRAG Configuration
+# ========================================
+
 CRAG_CONFIDENCE_THRESHOLD = _get_nested(_PARAMS, "crag", "confidence_threshold", default=0.6)
 CRAG_EXPANDED_K = _get_nested(_PARAMS, "crag", "expanded_k", default=8)
 
-SIMILARITY_THRESHOLD = _get_nested(_PARAMS, "retrieval", "similarity_threshold", default=0.7)
+# ========================================
+# CAG Configuration (Qdrant Semantic Cache)
+# ========================================
+
+CAG_COLLECTION_NAME = _get_nested(_PARAMS, "cag", "collection_name", default="cag_cache")
+CAG_SIMILARITY_THRESHOLD = _get_nested(_PARAMS, "cag", "similarity_threshold", default=0.90)
+CAG_CACHE_TTL = _get_nested(_PARAMS, "cag", "cache_ttl", default=86400)  # 24h
+CAG_CACHE_MAX_SIZE = _get_nested(_PARAMS, "cag", "max_cache_size", default=1000)
+
 
 # ========================================
 # Helper Functions

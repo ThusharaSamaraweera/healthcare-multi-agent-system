@@ -1,17 +1,24 @@
 from typing import Any, Optional, Dict
+from unittest import result
 from loguru import logger
 
-from services.chat_service.crag_service import CRAGService
-from services.chat_service.rag_service import QdrantRetriever
-from infrastructure.config import TOP_K_RESULTS, SIMILARITY_THRESHOLD, CRAG_EXPANDED_K
+from infrastructure.config import TOP_K_RESULTS, SIMILARITY_THRESHOLD, CRAG_EXPANDED_K, CRAG_CONFIDENCE_THRESHOLD
 from infrastructure.observability import observe
 from infrastructure.utils import format_docs
 
 
 class RAGTool:
     def __init__(self, embedder: Any, llm: Optional[Any] = None): 
+        from services.chat_service.cag_service import CAGService
+        from services.chat_service.crag_service import CRAGService
+        from services.chat_service.rag_service import QdrantRetriever
+        from services.chat_service.cag_cache import CAGCache
+
         self.embedder = embedder
         self.llm = llm
+
+        self._cag_service: Optional[CAGService] = None
+        self._cache = CAGCache(embedder=embedder)
 
         self.retriever = QdrantRetriever(
             embedder=embedder,
@@ -20,23 +27,35 @@ class RAGTool:
         )
 
         if llm is not None:
-            self._crag_service = CRAGService(
+            crag_service = CRAGService(
                 retriever=self.retriever,
                 llm=llm,
                 initial_k=TOP_K_RESULTS,
                 expanded_k=CRAG_EXPANDED_K,
             )
+
+            self._cag_service = CAGService(
+                crag_service=crag_service,
+                cache=self._cache,
+            )
+            logger.info(
+                "RAGTool initialised: CAG cache ({}) -> CRAG (k={}, expanded_k={}, threshold={:.2f})",
+                self._cache,
+                TOP_K_RESULTS,
+                CRAG_EXPANDED_K,
+                CRAG_CONFIDENCE_THRESHOLD,
+            )
         else:
             self._crag_service = None
-            logger.warning("LLM is not provided. CRAGService will not be initialized.")
+            logger.warning("LLM is not provided. CRAGService and CAGService will not be initialized.")
 
 
     @observe(name="rag_search")
     def search(self, query: str) -> str:
-        if self._crag_service is not None:
+        if self._cag_service is not None:
             try:
-                result = self._crag_service.generate(query)
-                return result.get('answer', 'No relevant information found in the internal knowledge base.')
+                result = self._cag_service.generate(query)
+                return result.get("answer", "")  or "No relevant information found in the internal knowledge base."
             except Exception as e:
                 logger.error(f"Error occurred while generating answer: {e}")
 
