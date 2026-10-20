@@ -199,3 +199,33 @@ class CAGCache:
             logger.debug("CAG cache SET: '{}' → point={}", query[:60], point_id)
         except Exception as exc:
             logger.warning("CAG cache SET error: {}", exc)
+
+    def clear(self) -> None:
+        """Delete all cached FAQ/answer points while keeping the collection."""
+        if not self._available:
+            return
+        try:
+            from qdrant_client.http.models import Filter
+
+            self._client.delete(
+                collection_name=self.collection_name,
+                points_selector=Filter(),
+            )
+            logger.info("Cleared CAG cache collection '{}'", self.collection_name)
+        except Exception as exc:
+            logger.warning("CAG cache CLEAR error: {}", exc)
+
+    def stats(self) -> Dict[str, Any]:
+        """Return basic cache collection information."""
+        if not self._available:
+            return {"available": False, "collection": self.collection_name}
+        try:
+            info = self._client.get_collection(self.collection_name)
+            return {
+                "available": True,
+                "collection": self.collection_name,
+                "points_count": info.points_count,
+            }
+        except Exception as exc:
+            logger.warning("CAG cache STATS error: {}", exc)
+            return {"available": False, "collection": self.collection_name}

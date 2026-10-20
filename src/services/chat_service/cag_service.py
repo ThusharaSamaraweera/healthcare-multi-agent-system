@@ -89,3 +89,25 @@ class CAGService:
         )
 
         return result
+
+    def warm_cache(self, queries: List[Any]) -> int:
+        """Pre-populate the cache from FAQ records or plain query strings."""
+        cached_count = 0
+        for item in queries:
+            if isinstance(item, dict) and item.get("query") and item.get("answer"):
+                self.cache.set(
+                    item["query"],
+                    {"answer": item["answer"], "evidence_urls": item.get("evidence_urls", [])},
+                )
+                cached_count += 1
+            elif isinstance(item, str) and item.strip():
+                result = self.generate(item, use_cache=True)
+                if result.get("answer", "").strip() and result.get("evidence_urls"):
+                    cached_count += 1
+        return cached_count
+
+    def cache_stats(self) -> Dict[str, Any]:
+        return self.cache.stats()
+
+    def clear_cache(self) -> None:
+        self.cache.clear()

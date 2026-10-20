@@ -185,6 +185,22 @@ CAG_CACHE_TTL = _get_nested(_PARAMS, "cag", "cache_ttl", default=86400)  # 24h
 CAG_CACHE_MAX_SIZE = _get_nested(_PARAMS, "cag", "max_cache_size", default=1000)
 
 
+def load_faqs() -> list:
+    """Flatten configured FAQ categories into query/answer records."""
+    faqs_config = _load_yaml("faqs.yaml")
+    if not faqs_config:
+        return []
+
+    faqs = []
+    for items in faqs_config.values():
+        if isinstance(items, list):
+            faqs.extend(item for item in items if isinstance(item, dict))
+    return faqs
+
+
+KNOWN_FAQS = load_faqs()
+
+
 # ========================================
 # Helper Functions
 # ========================================

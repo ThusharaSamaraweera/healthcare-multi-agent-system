@@ -1,5 +1,4 @@
 from typing import Any, Optional, Dict
-from unittest import result
 from loguru import logger
 
 from infrastructure.config import TOP_K_RESULTS, SIMILARITY_THRESHOLD, CRAG_EXPANDED_K, CRAG_CONFIDENCE_THRESHOLD
@@ -68,4 +67,20 @@ class RAGTool:
     def dispatch(self, action: str, params: Dict[str, Any]) -> str:
         if action == "search":
             return self.search(**params)
+        if action == "cache_stats":
+            return str(self.cache_stats())
+        if action == "clear_cache":
+            self.clear_cache()
+            return "CAG cache cleared."
         return f"Unknown RAG action: {action}"
+
+    def warm_cache(self, queries: list[Any]) -> int:
+        if self._cag_service is None:
+            return 0
+        return self._cag_service.warm_cache(queries)
+
+    def cache_stats(self) -> Dict[str, Any]:
+        return self._cache.stats()
+
+    def clear_cache(self) -> None:
+        self._cache.clear()
