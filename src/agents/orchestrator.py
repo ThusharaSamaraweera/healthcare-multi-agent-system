@@ -6,7 +6,7 @@ from loguru import logger
 from agents.state import AgentState
 from infrastructure.observability import observe, update_current_trace
 from agents.router import QueryRouter
-from agents.prompts.agent_prompts import (build_direct_agent_prompt, build_admin_agent_prompt)
+from agents.prompts.agent_prompts import (build_direct_agent_prompt, build_admin_agent_prompt, build_clinical_agent_prompt)
 from agents.tools.crm_tool import CRMTool
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, END
@@ -26,13 +26,20 @@ class AgentResponse:
 
 
 class AgentOrchestrator:
-    def __init__(self, llm_chat: Any, llm_router: Any, crm_tool: Optional[Any]) -> None:
+    def __init__(
+        self,
+        llm_chat: Any,
+        llm_router: Any,
+        crm_tool: Optional[Any] = None,
+        rag_tool: Optional[Any] = None,
+    ) -> None:
         self.llm_chat = llm_chat
         self.llm_router = llm_router
-        self.router = QueryRouter(llm=llm_router)
 
         self.crm_tool = crm_tool
+        self.rag_tool = rag_tool
 
+        self.router = QueryRouter(llm=llm_router)
         # Build the graph
         self.graph = self._build_graph()
 
@@ -117,7 +124,31 @@ class AgentOrchestrator:
 
     @observe(name="node_clinical_agent")
     def clinical_agent_node(self, state: AgentState) -> Dict:
-        pass
+        """Specialized Agent for Medical Info and Patient History."""
+        # Find the RAG-specific decision from route_decisions
+        decisions = state.get("route_decisions", [])
+        rag_decision = next(
+            (d for d in decisions if d.get("route") == "rag"),
+            state.get("route_decision", {})
+        )
+        params = rag_decision.get("params", {})
+        query = params.get("query", state["messages"][-1].content)
+
+        system_prompt = build_clinical_agent_prompt()
+
+        if not self.rag_tool:
+            tool_output = "RAG Tool unavailable."
+        else:
+            tool_output = self.rag_tool.dispatch("search", {"query": query})
+
+        answer = self._generate_agent_response(state, system_prompt, tool_output)
+
+        return {
+            "messages": [AIMessage(content=answer)],
+            "tool_output": tool_output,
+            "final_answer": answer,
+            "agent_outputs": [{"route": "rag", "tool_output": tool_output, "answer": answer}],
+        }
 
     @observe(name="node_direct_agent")
     def direct_agent_node(self, state: AgentState) -> Dict:
@@ -166,6 +197,7 @@ class AgentOrchestrator:
         route_map = {
             "crm": "admin",
             "direct": "direct",
+            "rag": "clinical"
         }
 
         decisions = state.get("route_decisions", [])
@@ -213,6 +245,7 @@ class AgentOrchestrator:
 
         workflow.add_edge("direct_agent", END)
         workflow.add_edge("admin_agent", END)
+        workflow.add_edge("clinical_agent", END)
 
         return workflow.compile()
     
@@ -264,10 +297,11 @@ class AgentOrchestrator:
 
 def build_agent(enable_crm: bool = True, enable_rag: bool = True, enable_web: bool = True) -> AgentOrchestrator:
     """Builds the Multi-Agent Orchestrator."""
-    from infrastructure.llm import get_chat_llm, get_router_llm
+    from infrastructure.llm import get_chat_llm, get_router_llm, get_default_embeddings
 
     llm_chat = get_chat_llm(temperature=0)
     llm_router = get_router_llm(temperature=0)
+    embedder = get_default_embeddings()
 
     crm_tool = None
     if enable_crm:
@@ -278,8 +312,18 @@ def build_agent(enable_crm: bool = True, enable_rag: bool = True, enable_web: bo
         except Exception as e:
             logger.warning(f"CRM tool unavailable: {e}")
 
+    rag_tool = None
+    if enable_rag:
+        try:
+            from agents.tools import RAGTool
+            rag_tool = RAGTool(embedder=embedder, llm=llm_chat)
+            logger.info("RAG tool initialised")
+        except Exception as e:
+            logger.warning(f"RAG tool unavailable: {e}")
+
     return AgentOrchestrator(
         llm_chat=llm_chat,
         llm_router=llm_router,
-        crm_tool=crm_tool
+        crm_tool=crm_tool,
+        rag_tool=rag_tool
     )

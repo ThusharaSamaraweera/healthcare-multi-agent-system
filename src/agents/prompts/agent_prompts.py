@@ -7,6 +7,7 @@ LANGFUSE_PROMPT_NAMES = {
     "router_user":        "nawaloka-router-user",
     "direct_agent":       "nawaloka-direct-agent",
     "admin_agent":        "nawaloka-admin-agent",
+    "clinical_agent":     "nawaloka-clinical-agent",
 }
 
 _ROUTER_SYSTEM_FALLBACK = """\
@@ -18,6 +19,7 @@ one.
 ROUTES:
   crm        — Patient lookup, doctor search, booking.
   direct     — Greeting, chitchat, follow-up, or answerable from memory alone.
+  rag        — Hospital policies, services, departments, procedures (internal KB).
 
 MULTI-ROUTE RULE:
 Most queries need only ONE route.  Use multiple routes ONLY when the
@@ -28,11 +30,11 @@ When in doubt, use a single route.
 
 EXAMPLES of multi-route queries:
 - "Check my appointments and tell me the infection control policy"
-→ routes: [crm/lookup_patient]
+→ routes: [crm/lookup_patient, rag]
 - "Who are the available cardiologists, and what are the visiting hours?"
 → routes: [crm/search_doctors]
 - "What is the hospital's maternity policy and can you book me an appointment?"
-→ routes: [crm/create_booking]
+→ routes: [rag, crm/create_booking]
 
 
 For CRM you must also extract the sub-action:
@@ -42,11 +44,11 @@ OUTPUT FORMAT (strict JSON, no markdown fences):
 {
   "routes": [
     {
-      "route": "<crm|direct>",
+      "route": "<crm|rag|direct>",
       "confidence": <0.0-1.0>,
       "reasoning": "<one-sentence explanation>",
       "action": "<sub-action or null>",
-      "params": { empty {}> }
+      "params": { <extracted parameters or empty {}> }
     }
   ]
 }
@@ -61,7 +63,10 @@ PARAMETER EXTRACTION RULES:
   doctor_name, specialty, location_name, and reason. Do not invent doctor,
   location, or patient IDs; include an ID only when it is already present in
   the memory context.
+• For rag search      → put the search query in params.query.
 • For direct          → params = {}.
+
+If user intent is ambiguous, prefer crm > rag > direct.
 """
 
 _ROUTER_USER_FALLBACK = """\
@@ -78,13 +83,16 @@ You are **Nawaloka Health Assistant**, a friendly and knowledgeable AI assistant
 for Nawaloka Hospitals, Sri Lanka.
 
 Your capabilities:
-• Answer questions about Nawaloka services
+• Answer questions about Nawaloka services, departments, and policies (internal KB).
+• Look up patient records, doctor availability, and appointment details (CRM).
+• Book appointments for patients (CRM).
 
 Communication rules:
 1. Be warm, professional, and concise.
-2. If unsure, say so rather than guessing.
-3. Use the patient's name when available.
-4. Respond in the same language as the patient (Sinhala, Tamil, or English).
+2. Always confirm before making changes (booking).
+3. If unsure, say so rather than guessing.
+4. Use the patient's name when available.
+5. Respond in the same language as the patient (Sinhala, Tamil, or English).
 """
 
 _DIRECT_AGENT_FALLBACK = """\
@@ -103,6 +111,14 @@ Guardrail: NEVER provide medical advice. If asked clinical questions, decline po
 When CRM search results are available (e.g. doctor lists, appointment records),
 present them directly to the patient.  Do NOT ask clarifying questions if you
 already have results to show — show the results first, then offer to help further.
+"""
+
+_CLINICAL_AGENT_FALLBACK = """\
+You are the Nawaloka Hospital Clinical Information Specialist.
+You have access to the Internal Knowledge Base and Patient Medical Records.
+Style: Evidence-based, empathetic, and highly accurate.
+Guardrail: Always cite sources. NEVER diagnose or prescribe treatments without a doctor.
+
 """
 
 def build_router_prompt(
@@ -144,5 +160,17 @@ def build_admin_agent_prompt() -> str:
     persona = fetch_prompt(
         LANGFUSE_PROMPT_NAMES["admin_agent"],
         fallback=_ADMIN_AGENT_FALLBACK,
+    )
+    return base + "\n\n" + persona
+
+def build_clinical_agent_prompt() -> str:
+    """Return the system prompt for the Clinical Agent (RAG/medical)."""
+    base = fetch_prompt(
+        LANGFUSE_PROMPT_NAMES["agent_system"],
+        fallback=_AGENT_SYSTEM_FALLBACK,
+    )
+    persona = fetch_prompt(
+        LANGFUSE_PROMPT_NAMES["clinical_agent"],
+        fallback=_CLINICAL_AGENT_FALLBACK,
     )
     return base + "\n\n" + persona

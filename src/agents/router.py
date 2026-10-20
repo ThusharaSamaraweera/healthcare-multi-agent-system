@@ -6,7 +6,7 @@ from infrastructure.observability import observe, update_current_observation
 from agents.prompts.agent_prompts import build_router_prompt
 
 # Valid routes
-VALID_ROUTES = {"direct", "crm"}
+VALID_ROUTES = {"direct", "crm", "rag"}
 
 # Maximum routes per query (safety cap)
 MAX_ROUTES = 3
