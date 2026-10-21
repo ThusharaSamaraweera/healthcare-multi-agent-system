@@ -184,6 +184,19 @@ CAG_SIMILARITY_THRESHOLD = _get_nested(_PARAMS, "cag", "similarity_threshold", d
 CAG_CACHE_TTL = _get_nested(_PARAMS, "cag", "cache_ttl", default=86400)  # 24h
 CAG_CACHE_MAX_SIZE = _get_nested(_PARAMS, "cag", "max_cache_size", default=1000)
 
+# ========================================
+# Memory Configuration (NOT in YAML - kept as constants)
+# ========================================
+
+# Short-term memory (Supabase st_turns table)
+ST_MAX_TURNS = 30
+ST_TTL_SECONDS = 60 * 60 * 24  # 24 hours
+
+# ========================================
+# Helper Functions
+# ========================================
+
+
 
 def load_faqs() -> list:
     """Flatten configured FAQ categories into query/answer records."""

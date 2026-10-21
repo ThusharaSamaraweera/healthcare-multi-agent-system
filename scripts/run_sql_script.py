@@ -8,7 +8,7 @@ from loguru import logger
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SQL_FILE = PROJECT_ROOT / "sql" / "001_crm_schema.sql"
+SQL_FILE = PROJECT_ROOT / "sql" / "007_short_term_memory.sql"
 
 # Make the src-layout imports work when this file is run from the repository
 # root, as required by the project scripts.
