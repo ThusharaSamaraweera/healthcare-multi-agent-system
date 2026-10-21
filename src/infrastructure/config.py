@@ -192,6 +192,11 @@ CAG_CACHE_MAX_SIZE = _get_nested(_PARAMS, "cag", "max_cache_size", default=1000)
 ST_MAX_TURNS = 30
 ST_TTL_SECONDS = 60 * 60 * 24  # 24 hours
 
+LT_TOP_K = 5
+LT_SIM_THRESHOLD = 0.30
+LT_TTL_SECONDS = 60 * 60 * 24 * 90
+LT_DECAY_HALF_LIFE_DAYS = 30
+
 # ========================================
 # Helper Functions
 # ========================================
