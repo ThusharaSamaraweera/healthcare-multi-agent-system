@@ -10,11 +10,11 @@ from agents.prompts.agent_prompts import (build_direct_agent_prompt, build_admin
 from agents.tools.crm_tool import CRMTool
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, END
-
+from memory.schemas import ConversationTurn
 @dataclass
 class AgentResponse:
     """
-    Complete agent response with metadata for the UI/Notebooks.
+    Complete agent response with metadata for the UI.
     """
     answer: str
     route: str = "direct"
@@ -30,6 +30,7 @@ class AgentOrchestrator:
         self,
         llm_chat: Any,
         llm_router: Any,
+        st_store: Optional[Any] = None,
         crm_tool: Optional[Any] = None,
         rag_tool: Optional[Any] = None,
     ) -> None:
@@ -38,6 +39,8 @@ class AgentOrchestrator:
 
         self.crm_tool = crm_tool
         self.rag_tool = rag_tool
+
+        self.st_store = st_store
 
         self.router = QueryRouter(llm=llm_router)
         # Build the graph
@@ -171,8 +174,20 @@ class AgentOrchestrator:
         pass
 
     @observe(name="node_save_memory")
-    def save_memory_node(self, state: AgentState) -> Dict:
-        pass
+    def save_memory(self, state: AgentState) -> Dict:
+        """Saves messages to short-term memory."""
+        user_message = state["messages"][0].content
+        answer = state["final_answer"]
+        user_id = state["user_id"]
+        session_id = state["session_id"]
+
+        # Store ST turns
+        now = time.time()
+        self.st_store.add(user_id, session_id, ConversationTurn(user_id=user_id, session_id=session_id, role="user", content=user_message, ts=now))
+        self.st_store.add(user_id, session_id, ConversationTurn(user_id=user_id, session_id=session_id, role="assistant", content=answer, ts=now))
+
+        return {"should_distill": False}
+
 
     def _generate_agent_response(self, state: AgentState, system_prompt: str, tool_output: str, extra_context: str = "") -> str:
 
@@ -229,7 +244,7 @@ class AgentOrchestrator:
         workflow.add_node("admin_agent", self.admin_agent_node)
         workflow.add_node("clinical_agent", self.clinical_agent_node)
         workflow.add_node("merge_responses", self.merge_responses_node)
-        workflow.add_node("save_memory", self.save_memory_node)
+        workflow.add_node("save_memory", self.save_memory)
 
         workflow.set_entry_point("supervisor")
 
@@ -298,10 +313,13 @@ class AgentOrchestrator:
 def build_agent(enable_crm: bool = True, enable_rag: bool = True, enable_web: bool = True) -> AgentOrchestrator:
     """Builds the Multi-Agent Orchestrator."""
     from infrastructure.llm import get_chat_llm, get_router_llm, get_default_embeddings
+    from memory.st_store import ShortTermMemoryStore
 
     llm_chat = get_chat_llm(temperature=0)
     llm_router = get_router_llm(temperature=0)
     embedder = get_default_embeddings()
+
+    st_store = ShortTermMemoryStore()
 
     crm_tool = None
     if enable_crm:
@@ -325,5 +343,6 @@ def build_agent(enable_crm: bool = True, enable_rag: bool = True, enable_web: bo
         llm_chat=llm_chat,
         llm_router=llm_router,
         crm_tool=crm_tool,
-        rag_tool=rag_tool
+        rag_tool=rag_tool,
+        st_store=st_store
     )
