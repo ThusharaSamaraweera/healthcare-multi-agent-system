@@ -1,8 +1,14 @@
 from typing import List, Tuple
 from loguru import logger
 import tiktoken
+import time
+import uuid
+import json
 
 from memory.schemas import ConversationTurn, MemoryFact
+from memory.prompts import build_distill_prompt
+from memory.policies import score_memory_fact, dedupe_facts
+
 from infrastructure.observability import observe, update_current_observation
 class MemoryRecaller:
     def __init__(self, st_store, lt_store):
@@ -85,3 +91,121 @@ class MemoryRecaller:
 
     def count_tokens(self, text: str) -> int:
         return len(self.tokenizer.encode(text))
+
+
+class MemoryDistiller:
+    """Extracts memorable facts from conversation turns."""
+
+    def __init__(self, llm, lt_store):
+        self.llm = llm
+        self.lt_store = lt_store
+
+    def should_distill(self, turns: List[ConversationTurn]) -> bool:
+        """Check if distillation should be triggered."""
+        if not turns:
+            return False
+        if len(turns) >= 5:
+            return True
+        keywords = ["remember", "from now on", "remind me", "always", "never"]
+        for turn in turns:
+            content_lower = turn.content.lower()
+            if any(kw in content_lower for kw in keywords):
+                return True
+        return False
+    
+    @observe(name="distill_facts", as_type="generation")
+    def distill(self, user_id: str, turns: List[ConversationTurn]) -> List[MemoryFact]:
+        """
+        Distill facts from conversation turns.
+
+        """
+        if not turns:
+            return []
+
+        system_prompt, user_prompt = build_distill_prompt(turns)
+
+        update_current_observation(
+            input=user_prompt[:1000],
+            model=self._model_name(),
+        )
+
+        try:
+            response = self.llm.invoke([
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ])
+            content = response.content if hasattr(response, "content") else str(response)
+            # Providers can return text blocks instead of a single string.
+            if isinstance(content, list):
+                content = "".join(
+                    block.get("text", "") if isinstance(block, dict) else str(block)
+                    for block in content
+                )
+            content = str(content).strip()
+
+            # Extract token usage if available
+            usage = {}
+            if hasattr(response, "response_metadata"):
+                meta = response.response_metadata or {}
+                token_usage = meta.get("token_usage") or meta.get("usage", {})
+                if token_usage:
+                    usage = {
+                        "input": token_usage.get("prompt_tokens", 0),
+                        "output": token_usage.get("completion_tokens", 0),
+                        "total": token_usage.get("total_tokens", 0),
+                    }
+
+            if "```json" in content:
+                content = content.split("```json")[1].split("```")[0].strip()
+            elif "```" in content:
+                content = content.split("```")[1].split("```")[0].strip()
+
+            if not content:
+                raise ValueError("Extractor returned empty output")
+
+            # Accept a JSON array embedded in a short explanatory response.
+            if not content.startswith("["):
+                start, end = content.find("["), content.rfind("]")
+                if start >= 0 and end > start:
+                    content = content[start : end + 1]
+            facts_data = json.loads(content)
+        except Exception as e:
+            logger.error(f"Failed to distill: {e}")
+            return []
+
+        now = time.time()
+        facts = []
+        for fact_data in facts_data:
+            fact_id = str(uuid.uuid4())
+            text = fact_data.get("text", "")
+            tags = fact_data.get("tags", [])
+            if not text:
+                continue
+            score = score_memory_fact(text=text, created_at=now, now=now, repetition_count=1)
+            fact = MemoryFact(
+                id=fact_id, user_id=user_id, text=text, score=score,
+                tags=tags, created_at=now, last_used_at=now, ttl_at=None, pin=False,
+            )
+            facts.append(fact)
+
+        embedder = self.lt_store.embedder if hasattr(self.lt_store, 'embedder') else None
+        facts = dedupe_facts(facts, embedder=embedder)
+        if facts:
+            self.lt_store.upsert(facts)
+            logger.info(f"Distilled {len(facts)} facts for user {user_id}")
+
+        update_current_observation(
+            output=f"Distilled {len(facts)} facts",
+            usage=usage if usage else None,
+            metadata={"facts_count": len(facts), "user_id": user_id},
+        )
+
+        return facts
+
+    def _model_name(self) -> str:
+        """Extract model name from the LLM for LangFuse metadata."""
+        if hasattr(self.llm, "model_name"):
+            return self.llm.model_name
+        if hasattr(self.llm, "model"):
+            return self.llm.model
+        return "unknown"

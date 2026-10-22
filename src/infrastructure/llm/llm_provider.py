@@ -56,7 +56,7 @@ def get_router_llm(temperature: float = 0, **kwargs: Any) -> ChatOpenAI:
 def get_extractor_llm(temperature: float = 0, **kwargs: Any) -> ChatOpenAI:
     """LLM for extraction tasks (distillation, topic tagging, trigger checks).
 
-    Model: llama-3.1-8b-instant via Groq.
+    Model: llama-3.1-8b-instant via OpenRouter.
     Ultra-fast (~50ms), free tier, perfect for structured extraction.
     """
     return _build_llm(EXTRACTOR_MODEL, EXTRACTOR_PROVIDER, temperature=temperature, **kwargs)
@@ -69,30 +69,4 @@ def get_chat_llm(temperature: float = 0, **kwargs: Any) -> ChatOpenAI:
     High quality, generous context window, natural tone.
     """
     return _build_llm(CHAT_MODEL, CHAT_PROVIDER, temperature=temperature, **kwargs)
-
-def validate() -> None:
-    """
-    Validate configuration and create required directories.
-
-    Raises:
-        ValueError: If required secrets are missing
-        OSError: If directories cannot be created
-    """
-    # Check required secrets based on provider
-    api_key = get_api_key()
-    if not api_key:
-        key_name = "OPENROUTER_API_KEY" if PROVIDER == "openrouter" else f"{PROVIDER.upper()}_API_KEY"
-        raise ValueError(
-            f"❌ Missing required secret: {key_name}\n"
-            f"Please add it to your .env file."
-        )
-
-    # Create required directories (only active ones)
-    required_dirs = [DATA_DIR, KB_DIR]
-
-    for dir_path in required_dirs:
-        try:
-            dir_path.mkdir(parents=True, exist_ok=True)
-        except (PermissionError, OSError) as e:
-            raise OSError(f"❌ Cannot create directory {dir_path}: {e}")
 

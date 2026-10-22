@@ -32,6 +32,7 @@ class AgentOrchestrator:
         llm_router: Any,
         st_store: Optional[Any] = None,
         recaller: Optional[Any] = None,
+        distiller: Optional[Any] = None,
         crm_tool: Optional[Any] = None,
         rag_tool: Optional[Any] = None,
     ) -> None:
@@ -42,6 +43,7 @@ class AgentOrchestrator:
         self.rag_tool = rag_tool
 
         self.recaller = recaller
+        self.distiller = distiller
         self.st_store = st_store
 
         self.router = QueryRouter(llm=llm_router)
@@ -213,7 +215,7 @@ class AgentOrchestrator:
         pass
 
     @observe(name="node_save_memory")
-    def save_memory(self, state: AgentState) -> Dict:
+    def store_and_distill_node(self, state: AgentState) -> Dict:
         """Saves messages to short-term memory."""
         user_message = state["messages"][0].content
         answer = state["final_answer"]
@@ -224,6 +226,16 @@ class AgentOrchestrator:
         now = time.time()
         self.st_store.add(user_id, session_id, ConversationTurn(user_id=user_id, session_id=session_id, role="user", content=user_message, ts=now))
         self.st_store.add(user_id, session_id, ConversationTurn(user_id=user_id, session_id=session_id, role="assistant", content=answer, ts=now))
+
+        # Distill if needed
+        try:
+            recent = self.st_store.recent(user_id, session_id, k=5)
+            if self.distiller.should_distill(recent):
+                logger.info(f"Distilling new facts for {user_id}...")
+                self.distiller.distill(user_id, recent)
+                return {"should_distill": True}
+        except Exception as e:
+            logger.warning(f"Distillation failed: {e}")
 
         return {"should_distill": False}
 
@@ -283,7 +295,7 @@ class AgentOrchestrator:
         workflow.add_node("admin_agent", self.admin_agent_node)
         workflow.add_node("clinical_agent", self.clinical_agent_node)
         workflow.add_node("merge_responses", self.merge_responses_node)
-        workflow.add_node("save_memory", self.save_memory)
+        workflow.add_node("save_memory", self.store_and_distill_node)
 
         workflow.set_entry_point("recall")
         workflow.add_edge("recall", "supervisor")
@@ -354,18 +366,20 @@ class AgentOrchestrator:
 
 def build_agent(enable_crm: bool = True, enable_rag: bool = True, enable_web: bool = True) -> AgentOrchestrator:
     """Builds the Multi-Agent Orchestrator."""
-    from infrastructure.llm import get_chat_llm, get_router_llm, get_default_embeddings
+    from infrastructure.llm import get_chat_llm, get_router_llm, get_default_embeddings, get_extractor_llm
     from memory.st_store import ShortTermMemoryStore
     from memory.lt_store import LongTermMemoryStore
-    from memory.memory_ops import MemoryRecaller
+    from memory.memory_ops import MemoryRecaller, MemoryDistiller
 
     llm_chat = get_chat_llm(temperature=0)
     llm_router = get_router_llm(temperature=0)
     embedder = get_default_embeddings()
+    llm_extractor = get_extractor_llm(temperature=0)
 
     st_store = ShortTermMemoryStore()
     lt_store = LongTermMemoryStore(embedder)
     recaller = MemoryRecaller(st_store=st_store, lt_store=lt_store)
+    distiller = MemoryDistiller(llm_extractor, lt_store)
 
     crm_tool = None
     if enable_crm:
@@ -391,5 +405,6 @@ def build_agent(enable_crm: bool = True, enable_rag: bool = True, enable_web: bo
         crm_tool=crm_tool,
         rag_tool=rag_tool,
         st_store=st_store,
+        distiller=distiller,
         recaller=recaller
     )
