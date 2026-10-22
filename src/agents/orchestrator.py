@@ -31,6 +31,7 @@ class AgentOrchestrator:
         llm_chat: Any,
         llm_router: Any,
         st_store: Optional[Any] = None,
+        recaller: Optional[Any] = None,
         crm_tool: Optional[Any] = None,
         rag_tool: Optional[Any] = None,
     ) -> None:
@@ -40,6 +41,7 @@ class AgentOrchestrator:
         self.crm_tool = crm_tool
         self.rag_tool = rag_tool
 
+        self.recaller = recaller
         self.st_store = st_store
 
         self.router = QueryRouter(llm=llm_router)
@@ -51,8 +53,26 @@ class AgentOrchestrator:
 
     @observe(name="node_recall")
     def recall_node(self, state: AgentState) -> Dict:
-        pass
+        """Reads conversation history and long-term facts into the state."""
 
+        user_id = state["user_id"]
+        session_id = state["session_id"]
+
+        try:
+            st_turns = self.st_store.recent(
+                user_id=user_id,
+                session_id=session_id,
+                k=5,
+            )
+            memory_context = self.recaller.format_context(st_turns)
+ 
+            return {
+                "memory_context": memory_context
+            }
+        except Exception as e:
+            logger.warning(f"Recall node failed: {e}")
+            return {"memory_context": "(memory offline)"}
+        
     @observe(name="node_supervisor")
     def supervisor_node(self, state: AgentState) -> Dict:
 
@@ -246,7 +266,8 @@ class AgentOrchestrator:
         workflow.add_node("merge_responses", self.merge_responses_node)
         workflow.add_node("save_memory", self.save_memory)
 
-        workflow.set_entry_point("supervisor")
+        workflow.set_entry_point("recall")
+        workflow.add_edge("recall", "supervisor")
 
         workflow.add_conditional_edges(
             "supervisor",
@@ -258,9 +279,11 @@ class AgentOrchestrator:
             },
         )
 
-        workflow.add_edge("direct_agent", END)
-        workflow.add_edge("admin_agent", END)
-        workflow.add_edge("clinical_agent", END)
+        workflow.add_edge("direct_agent", "save_memory")
+        workflow.add_edge("admin_agent", "save_memory")
+        workflow.add_edge("clinical_agent", "save_memory")
+
+        workflow.add_edge("save_memory", END)
 
         return workflow.compile()
     
@@ -314,12 +337,14 @@ def build_agent(enable_crm: bool = True, enable_rag: bool = True, enable_web: bo
     """Builds the Multi-Agent Orchestrator."""
     from infrastructure.llm import get_chat_llm, get_router_llm, get_default_embeddings
     from memory.st_store import ShortTermMemoryStore
+    from memory.memory_ops import MemoryRecaller
 
     llm_chat = get_chat_llm(temperature=0)
     llm_router = get_router_llm(temperature=0)
     embedder = get_default_embeddings()
 
     st_store = ShortTermMemoryStore()
+    recaller = MemoryRecaller(st_store=st_store)
 
     crm_tool = None
     if enable_crm:
@@ -344,5 +369,6 @@ def build_agent(enable_crm: bool = True, enable_rag: bool = True, enable_web: bo
         llm_router=llm_router,
         crm_tool=crm_tool,
         rag_tool=rag_tool,
-        st_store=st_store
+        st_store=st_store,
+        recaller=recaller
     )
