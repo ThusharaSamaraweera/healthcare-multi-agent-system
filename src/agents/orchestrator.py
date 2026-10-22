@@ -6,7 +6,7 @@ from loguru import logger
 from agents.state import AgentState
 from infrastructure.observability import observe, update_current_trace
 from agents.router import QueryRouter
-from agents.prompts.agent_prompts import (build_direct_agent_prompt, build_admin_agent_prompt, build_clinical_agent_prompt)
+from agents.prompts.agent_prompts import (build_direct_agent_prompt, build_admin_agent_prompt, build_clinical_agent_prompt, build_merge_prompt)
 from agents.tools.crm_tool import CRMTool
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, END
@@ -153,8 +153,6 @@ class AgentOrchestrator:
 
         return {
             "messages": [AIMessage(content=answer)],
-            "tool_output": tool_output,
-            "final_answer": answer,
             "agent_outputs": [{"route": "crm", "tool_output": tool_output, "answer": answer}],
         }
 
@@ -189,8 +187,6 @@ class AgentOrchestrator:
 
         return {
             "messages": [AIMessage(content=answer)],
-            "tool_output": tool_output,
-            "final_answer": answer,
             "agent_outputs": [{"route": "rag", "tool_output": tool_output, "answer": answer}],
         }
 
@@ -205,14 +201,68 @@ class AgentOrchestrator:
 
         return {
             "messages": [AIMessage(content=answer)],
-            "final_answer": answer,
-            "tool_output": "",
             "agent_outputs": [{"route": route_label,"tool_output": "", "answer": answer}],
         }
 
     @observe(name="node_merge_responses")
     def merge_responses_node(self, state: AgentState) -> Dict:
-        pass
+        """
+        Fan-in node: merges outputs from parallel agent nodes.
+        """
+        agent_outputs = state.get("agent_outputs", [])
+
+        # Single agent → promote its collected result to scalar response fields.
+        if len(agent_outputs) <= 1:
+            if not agent_outputs:
+                return {}
+
+            output = agent_outputs[0]
+            answer = output.get("answer", "")
+            return {
+                "final_answer": answer,
+                "tool_output": output.get("tool_output", ""),
+                "messages": [AIMessage(content=answer)],
+            }
+
+        # Multi-agent → synthesize into one response
+        logger.info(f"Merging {len(agent_outputs)} agent outputs into unified response")
+
+        user_message = state["messages"][0].content
+        memory_context = state.get("memory_context", "")
+
+        # Build labelled tool output sections for the synthesiser
+        combined_tool_output = ""
+        for out in agent_outputs:
+            route = out.get("route", "unknown").upper()
+            answer = out.get("answer", "")
+            combined_tool_output += f"=== {route} AGENT RESULT ===\n{answer}\n\n"
+
+        system_prompt = build_merge_prompt()
+
+        system_content = (
+            f"{system_prompt}\n\n"
+            f"=== MEMORY CONTEXT ===\n{memory_context}\n\n"
+            f"=== AGENT RESULTS TO MERGE ===\n{combined_tool_output}"
+        )
+
+        messages = [
+            SystemMessage(content=system_content),
+            HumanMessage(content=user_message),
+        ]
+
+        response = self.llm_chat.invoke(messages)
+        merged_answer = response.content if hasattr(response, "content") else str(response)
+
+        # Combine all tool outputs
+        all_tool_output = "\n---\n".join(
+            out.get("tool_output", "") for out in agent_outputs if out.get("tool_output")
+        )
+
+        return {
+            "final_answer": merged_answer,
+            "tool_output": all_tool_output,
+            "messages": [AIMessage(content=merged_answer)],
+        }
 
     @observe(name="node_save_memory")
     def store_and_distill_node(self, state: AgentState) -> Dict:
@@ -238,7 +288,6 @@ class AgentOrchestrator:
             logger.warning(f"Distillation failed: {e}")
 
         return {"should_distill": False}
-
 
     def _generate_agent_response(self, state: AgentState, system_prompt: str, tool_output: str, extra_context: str = "") -> str:
 
@@ -310,10 +359,11 @@ class AgentOrchestrator:
             },
         )
 
-        workflow.add_edge("direct_agent", "save_memory")
-        workflow.add_edge("admin_agent", "save_memory")
-        workflow.add_edge("clinical_agent", "save_memory")
+        workflow.add_edge("direct_agent", "merge_responses")
+        workflow.add_edge("admin_agent", "merge_responses")
+        workflow.add_edge("clinical_agent", "merge_responses")
 
+        workflow.add_edge("merge_responses", "save_memory")
         workflow.add_edge("save_memory", END)
 
         return workflow.compile()

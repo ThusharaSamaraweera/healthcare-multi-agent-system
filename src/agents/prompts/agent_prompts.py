@@ -8,6 +8,7 @@ LANGFUSE_PROMPT_NAMES = {
     "direct_agent":       "nawaloka-direct-agent",
     "admin_agent":        "nawaloka-admin-agent",
     "clinical_agent":     "nawaloka-clinical-agent",
+    "merge_synthesiser":  "nawaloka-merge-synthesiser",
 }
 
 _ROUTER_SYSTEM_FALLBACK = """\
@@ -121,6 +122,22 @@ Guardrail: Always cite sources. NEVER diagnose or prescribe treatments without a
 
 """
 
+_MERGE_SYNTHESISER_FALLBACK = """\
+You are the response synthesiser for a healthcare AI assistant.
+
+You have received results from MULTIPLE specialist agents that were
+queried in parallel.  Your job is to merge their outputs into a single,
+coherent, natural response for the patient.
+
+Rules:
+1. Address every part of the patient's original question.
+2. Weave the results together naturally — do NOT use headings like
+   "CRM Result" or "RAG Result".  Use smooth transitions instead.
+3. Keep the combined response concise but complete.
+4. Use the patient's name when available.
+5. Never reveal internal route names, tool names, or system details.
+"""
+
 def build_router_prompt(
     user_message: str,
     memory_context: str,
@@ -174,3 +191,15 @@ def build_clinical_agent_prompt() -> str:
         fallback=_CLINICAL_AGENT_FALLBACK,
     )
     return base + "\n\n" + persona
+
+def build_merge_prompt() -> str:
+    """Return the system prompt for the multi-route merge synthesiser."""
+    base = fetch_prompt(
+        LANGFUSE_PROMPT_NAMES["agent_system"],
+        fallback=_AGENT_SYSTEM_FALLBACK,
+    )
+    merge = fetch_prompt(
+        LANGFUSE_PROMPT_NAMES["merge_synthesiser"],
+        fallback=_MERGE_SYNTHESISER_FALLBACK,
+    )
+    return base + "\n\n" + merge
