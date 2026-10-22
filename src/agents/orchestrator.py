@@ -57,17 +57,20 @@ class AgentOrchestrator:
 
         user_id = state["user_id"]
         session_id = state["session_id"]
+        user_message = state["messages"][-1].content
 
         try:
-            st_turns = self.st_store.recent(
+            st_turns, lt_facts = self.recaller.recall(
                 user_id=user_id,
                 session_id=session_id,
-                k=5,
+                query=user_message
             )
             memory_context = self.recaller.format_context(st_turns)
+            semantic_facts = [f.to_dict() if hasattr(f, 'to_dict') else vars(f) for f in lt_facts]
  
             return {
-                "memory_context": memory_context
+                "memory_context": memory_context,
+                "semantic_facts": semantic_facts
             }
         except Exception as e:
             logger.warning(f"Recall node failed: {e}")
@@ -77,9 +80,17 @@ class AgentOrchestrator:
     def supervisor_node(self, state: AgentState) -> Dict:
 
         user_message = state["messages"][-1].content
+        memory_context = state.get("memory_context", "")
         
+        # Augment context with LT facts for the Router
+        facts = state.get("semantic_facts", [])
+        if facts:
+            memory_context += "\n=== LONG-TERM FACTS ===\n"
+            for f in facts:
+                memory_context += f"- {f.get('text', '')}\n"
+
         # Router now returns MultiRouteDecision
-        multi_decision = self.router.route(user_message)
+        multi_decision = self.router.route(user_message, memory_context)
 
         # Serialise all decisions for the state
         route_decisions = [
@@ -159,12 +170,20 @@ class AgentOrchestrator:
 
         system_prompt = build_clinical_agent_prompt()
 
+        # Inject semantic facts for clinical context
+        facts = state.get("semantic_facts", [])
+        kb_context = ""
+        if facts:
+            kb_context += "\n=== PATIENT CLINICAL HISTORY ===\n"
+            for f in facts:
+                kb_context += f"- {f.get('text', '')}\n"
+
         if not self.rag_tool:
             tool_output = "RAG Tool unavailable."
         else:
             tool_output = self.rag_tool.dispatch("search", {"query": query})
 
-        answer = self._generate_agent_response(state, system_prompt, tool_output)
+        answer = self._generate_agent_response(state, system_prompt, tool_output, extra_context=kb_context)
 
         return {
             "messages": [AIMessage(content=answer)],
@@ -337,6 +356,7 @@ def build_agent(enable_crm: bool = True, enable_rag: bool = True, enable_web: bo
     """Builds the Multi-Agent Orchestrator."""
     from infrastructure.llm import get_chat_llm, get_router_llm, get_default_embeddings
     from memory.st_store import ShortTermMemoryStore
+    from memory.lt_store import LongTermMemoryStore
     from memory.memory_ops import MemoryRecaller
 
     llm_chat = get_chat_llm(temperature=0)
@@ -344,7 +364,8 @@ def build_agent(enable_crm: bool = True, enable_rag: bool = True, enable_web: bo
     embedder = get_default_embeddings()
 
     st_store = ShortTermMemoryStore()
-    recaller = MemoryRecaller(st_store=st_store)
+    lt_store = LongTermMemoryStore(embedder)
+    recaller = MemoryRecaller(st_store=st_store, lt_store=lt_store)
 
     crm_tool = None
     if enable_crm:
