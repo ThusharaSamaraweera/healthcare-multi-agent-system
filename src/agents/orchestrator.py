@@ -35,12 +35,14 @@ class AgentOrchestrator:
         distiller: Optional[Any] = None,
         crm_tool: Optional[Any] = None,
         rag_tool: Optional[Any] = None,
+        web_tool: Optional[Any] = None,
     ) -> None:
         self.llm_chat = llm_chat
         self.llm_router = llm_router
 
         self.crm_tool = crm_tool
         self.rag_tool = rag_tool
+        self.web_tool = web_tool
 
         self.recaller = recaller
         self.distiller = distiller
@@ -194,14 +196,26 @@ class AgentOrchestrator:
     def direct_agent_node(self, state: AgentState) -> Dict:
         """Specialized Agent for greetings and general inquiries."""
         system_prompt = build_direct_agent_prompt()
+        # Check if any decision routes to web_search
+        decisions = state.get("route_decisions", [])
+        web_decision = next(
+            (d for d in decisions if d.get("route") == "web_search"),
+            None
+        )
 
+        tool_output = ""
         route_label = "direct"
+        if web_decision and self.web_tool:
+            params = web_decision.get("params", {})
+            query = params.get("query", state["messages"][-1].content)
+            tool_output = self.web_tool.dispatch("search", {"query": query})
+            route_label = "web_search"
 
-        answer = self._generate_agent_response(state, system_prompt, "")
+        answer = self._generate_agent_response(state, system_prompt, tool_output)
 
         return {
             "messages": [AIMessage(content=answer)],
-            "agent_outputs": [{"route": route_label,"tool_output": "", "answer": answer}],
+            "agent_outputs": [{"route": route_label,"tool_output": tool_output, "answer": answer}],
         }
 
     @observe(name="node_merge_responses")
@@ -312,7 +326,8 @@ class AgentOrchestrator:
         route_map = {
             "crm": "admin",
             "direct": "direct",
-            "rag": "clinical"
+            "rag": "clinical",
+            "web_search": "direct"
         }
 
         decisions = state.get("route_decisions", [])
@@ -449,11 +464,22 @@ def build_agent(enable_crm: bool = True, enable_rag: bool = True, enable_web: bo
         except Exception as e:
             logger.warning(f"RAG tool unavailable: {e}")
 
+
+    web_tool = None
+    if enable_web:
+        try:
+            from agents.tools import WebSearchTool
+            web_tool = WebSearchTool()
+            logger.info("Web search tool initialised")
+        except Exception as e:
+            logger.warning(f"Web search tool unavailable: {e}")
+
     return AgentOrchestrator(
         llm_chat=llm_chat,
         llm_router=llm_router,
         crm_tool=crm_tool,
         rag_tool=rag_tool,
+        web_tool=web_tool,
         st_store=st_store,
         distiller=distiller,
         recaller=recaller

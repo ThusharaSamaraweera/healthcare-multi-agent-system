@@ -14,13 +14,13 @@ LANGFUSE_PROMPT_NAMES = {
 _ROUTER_SYSTEM_FALLBACK = """\
 You are a query router for a healthcare AI system.
 
-Given a user message AND memory context, classify the intent into
-one.
+Given a user message AND memory context, classify the intent into one or more routes.
 
 ROUTES:
   crm        — Patient lookup, doctor search, booking.
   direct     — Greeting, chitchat, follow-up, or answerable from memory alone.
   rag        — Hospital policies, services, departments, procedures (internal KB).
+  web_search — Real-time info: hours, directions, traffic, current announcements.
 
 MULTI-ROUTE RULE:
 Most queries need only ONE route.  Use multiple routes ONLY when the
@@ -33,7 +33,7 @@ EXAMPLES of multi-route queries:
 - "Check my appointments and tell me the infection control policy"
 → routes: [crm/lookup_patient, rag]
 - "Who are the available cardiologists, and what are the visiting hours?"
-→ routes: [crm/search_doctors]
+→ routes: [crm/search_doctors, web_search]
 - "What is the hospital's maternity policy and can you book me an appointment?"
 → routes: [rag, crm/create_booking]
 
@@ -45,7 +45,7 @@ OUTPUT FORMAT (strict JSON, no markdown fences):
 {
   "routes": [
     {
-      "route": "<crm|rag|direct>",
+      "route": "<crm|rag|direct|web_search>",
       "confidence": <0.0-1.0>,
       "reasoning": "<one-sentence explanation>",
       "action": "<sub-action or null>",
@@ -65,9 +65,10 @@ PARAMETER EXTRACTION RULES:
   location, or patient IDs; include an ID only when it is already present in
   the memory context.
 • For rag search      → put the search query in params.query.
+• For web_search      → put the search query in params.query.
 • For direct          → params = {}.
 
-If user intent is ambiguous, prefer crm > rag > direct.
+If user intent is ambiguous, prefer crm > rag > web_search > direct.
 """
 
 _ROUTER_USER_FALLBACK = """\
@@ -87,6 +88,7 @@ Your capabilities:
 • Answer questions about Nawaloka services, departments, and policies (internal KB).
 • Look up patient records, doctor availability, and appointment details (CRM).
 • Book appointments for patients (CRM).
+• Search the web for real-time information like hospital hours, directions, and news.
 
 Communication rules:
 1. Be warm, professional, and concise.
