@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional, Union
 from loguru import logger
 
 from agents.state import AgentState
-from infrastructure.observability import observe, update_current_trace
+from infrastructure.observability import observe, trace_attributes
 from agents.router import QueryRouter
 from agents.prompts.agent_prompts import (build_direct_agent_prompt, build_admin_agent_prompt, build_clinical_agent_prompt, build_merge_prompt)
 from agents.tools.crm_tool import CRMTool
@@ -396,12 +396,6 @@ class AgentOrchestrator:
         normalized_user_id = CRMTool._normalize_external_user_id(user_id)
         canonical_user_id = normalized_user_id or user_id.strip()
 
-        update_current_trace(
-            user_id=canonical_user_id,
-            session_id=session_id,
-            metadata={"entrypoint": "achat"},
-        )
-
         initial_state = {
             "messages": [HumanMessage(content=user_message)],
             "user_id": canonical_user_id,
@@ -409,9 +403,13 @@ class AgentOrchestrator:
             "operational_context": operational_context,
             "agent_outputs": [],
         }
-
-        # Non-blocking graph execution
-        final_state = await self.graph.ainvoke(initial_state)
+        with trace_attributes(
+            user_id=canonical_user_id,
+            session_id=session_id,
+            metadata={"entrypoint": "achat"},
+        ):
+            final_state = await self.graph.ainvoke(initial_state)
+            
 
         latency = int((time.time() - t0) * 1000)
 

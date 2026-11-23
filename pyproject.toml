@@ -68,7 +68,7 @@ dependencies = [
     "tavily-python>=0.3.0",
 
     # ── Observability & Logging ──────────────────────────────────
-    "langfuse==3.14.3",
+    "langfuse>=4.7,<5",
     "loguru>=0.7.0",
 ]
 

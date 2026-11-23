@@ -1,6 +1,7 @@
 from loguru import logger
 import os
-from typing import Optional
+from contextlib import nullcontext
+from typing import ContextManager, Mapping, Optional, Sequence
 
 # ---------------------------------------------------------------------------
 # Config flag
@@ -109,9 +110,11 @@ def fetch_prompt(
 try:
     from langfuse import observe as _lf_observe
     from langfuse import get_client as _get_lf_client
+    from langfuse import propagate_attributes as _propagate_attributes
 except ImportError:
     _lf_observe = None
     _get_lf_client = None
+    _propagate_attributes = None
     logger.debug("langfuse package not installed — @observe is a no-op.")
 
 
@@ -136,34 +139,27 @@ def observe(
 
     return _lf_observe(**kwargs)
 
-def update_current_trace(
+def trace_attributes(
     *,
     user_id: Optional[str] = None,
     session_id: Optional[str] = None,
-    metadata: Optional[dict] = None,
-    tags: Optional[list] = None,
-) -> None:
-    """
-    Update the current LangFuse trace with user/session info.
+    metadata: Optional[Mapping[str, str]] = None,
+    tags: Optional[Sequence[str]] = None,
+) -> ContextManager[None]:
+    """Propagate request attributes to the current and child observations."""
+    if _propagate_attributes is None or not _is_enabled() or get_langfuse() is None:
+        return nullcontext()
 
-    Safe to call even when tracing is disabled (no-op).
-    """
-    if _get_lf_client is None or not _is_enabled():
-        return
-    try:
-        client = _get_lf_client()
-        kwargs = {}
-        if user_id is not None:
-            kwargs["user_id"] = user_id
-        if session_id is not None:
-            kwargs["session_id"] = session_id
-        if metadata is not None:
-            kwargs["metadata"] = metadata
-        if tags is not None:
-            kwargs["tags"] = tags
-        client.update_current_trace(**kwargs)
-    except Exception as exc:
-        logger.debug("update_current_trace failed (non-critical): {}", exc)
+    attributes = {}
+    if user_id is not None:
+        attributes["user_id"] = user_id
+    if session_id is not None:
+        attributes["session_id"] = session_id
+    if metadata is not None:
+        attributes["metadata"] = dict(metadata)
+    if tags is not None:
+        attributes["tags"] = list(tags)
+    return _propagate_attributes(**attributes)
 
 def update_current_observation(
     *,
